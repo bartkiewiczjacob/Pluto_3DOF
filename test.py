@@ -1,12 +1,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.interpolate
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 from scipy.optimize import differential_evolution as opt
 from scipy.optimize import NonlinearConstraint
-import ambiance as amb
-import pymap3d as pm
+from ambiance import Atmosphere
+from pymap3d import enu2geodetic
 plt.style.use('seaborn-poster')
 lato = 0.1
 lono = 0.1
@@ -18,10 +17,10 @@ def ca(M):
     cd_ref = [0.3,0.26,0.4,0.55,0.47,0.36,0.28,0.24,0.21,0.20,0.20,0.21,0.22,0.23,0.24,0.25]
     M_ref = [0,0.5,1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5]
     f = interp1d(M_ref,cd_ref,bounds_error=False,fill_value=0.25)
-    ca = f(M)
-    return float(ca)
+    cax = f(M)
+    return float(cax)
 def hit_ground(t,y,omegas):
-    lat, lon, alt = pm.enu2geodetic(y[0], y[1], y[2], lato, lono, alto)
+    lat, lon, alt = enu2geodetic(y[0], y[1], y[2], lato, lono, alto)
     return alt
 def reach_apogee(t,y,omegas):
     return y[5]
@@ -52,9 +51,9 @@ def dynamics(t,x,omegas):
               [np.sin(x[6])*np.sin(x[8])-np.cos(x[6])*np.cos(x[8])*np.sin(x[7]), np.cos(x[8])*np.sin(x[6])+np.cos(x[6])*np.sin(x[7])*np.sin(x[8]),np.cos(x[6])*np.cos(x[7])]])
     m_dot = mass_func(t)
     v = [x[3], x[4], x[5]]
-    lat,lon,alt = pm.enu2geodetic(x[0],x[1],x[2],lato,lono,alto)
+    lat,lon,alt = enu2geodetic(x[0], x[1], x[2], lato, lono, alto)
     if (alt < 80000)&(alt > 0):
-        atmos = amb.Atmosphere(alt)
+        atmos = Atmosphere(alt)
         rho = atmos.density
         P = atmos.pressure
         a = atmos.speed_of_sound
@@ -86,19 +85,24 @@ def obj_func(x):
     return -sol.y[3,-1]
 def final_alt(x):
     sol = propagate(lato,lono,alto,100,wind_vel,S,[0,x[0],0],1000)
-    return sol.y[2,-1]
-nlc = NonlinearConstraint(final_alt,100000,100001)
-vo = obj_func([-0.01])
-res = opt(obj_func,[(-0.1,0)],constraints=nlc,disp=True,atol=1E-6,polish=False,x0=-0.00675089,popsize=15,maxiter=100)
+    lat, lon, alt = enu2geodetic(sol.y[0], sol.y[1], sol.y[2], lato, lono, alto)
+    return alt[-1]
+nlc = NonlinearConstraint(final_alt,100000,101000)
+rate_o = -0.001
+sol_o = propagate(lato,lono,alto,100,wind_vel,S,[0,rate_o,0],1000)
+lat_o,lon_o,alt_o = enu2geodetic(sol_o.y[0], sol_o.y[1], sol_o.y[2], lato, lono, alto)
+res = opt(obj_func,[(-0.1,0)],constraints=nlc,disp=True,atol=1E-6,polish=False,x0=rate_o,popsize=15,maxiter=100)
 print(res.x)
 sol = propagate(lato,lono,alto,100,wind_vel,S,[0,res.x[0],0],1000)
-lat,lon,alt = pm.enu2geodetic(sol.y[0],sol.y[1],sol.y[2],lato,lono,alto)
+lat,lon,alt = enu2geodetic(sol.y[0], sol.y[1], sol.y[2], lato, lono, alto)
 fig = plt.figure(figsize=(12, 4))
 ax = fig.add_subplot(111)
-plt.plot(sol.y[0],alt)
-plt.xlabel('Range')
-plt.ylabel('Altitude')
+plt.plot(sol_o.y[0],alt_o,label='Original')
+plt.plot(sol.y[0],alt,label='Optimized')
+plt.xlabel('Range[m]')
+plt.ylabel('Altitude[m]')
 ax.set_aspect('equal', adjustable='box')
+ax.legend()
 plt.grid()
 plt.show()
 
