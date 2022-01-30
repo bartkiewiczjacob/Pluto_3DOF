@@ -44,12 +44,23 @@ def aero_func(M):
     cax = ca(M)
     coeffs = [cax,1.0,1.0]
     return coeffs
-def dynamics(t,x,omegas):
+def omegas(t,opts):
+    if t < 37.5:
+        omegas = [0,opts[0],0]
+    elif t < 75:
+        omegas = [0,opts[1],0]
+    elif t < 112.5:
+        omegas = [0,opts[2],0]
+    else:
+        omegas = [0,opts[3],0]
+    return omegas
+def dynamics(t,x,opts):
     g = 9.8
     R = np.array([[np.cos(x[7])*np.cos(x[8]), -np.cos(x[7])*np.sin(x[8]), np.sin(x[7])],
               [np.cos(x[6])*np.sin(x[8])+np.cos(x[8])*np.sin(x[6])*np.sin(x[7]), np.cos(x[6])*np.cos(x[8])-np.sin(x[6])*np.sin(x[7])*np.sin(x[8]),-np.cos(x[7])*np.sin(x[6])],
               [np.sin(x[6])*np.sin(x[8])-np.cos(x[6])*np.cos(x[8])*np.sin(x[7]), np.cos(x[8])*np.sin(x[6])+np.cos(x[6])*np.sin(x[7])*np.sin(x[8]),np.cos(x[6])*np.cos(x[7])]])
     m_dot = mass_func(t)
+    rates = omegas(t,opts)
     v = [x[3], x[4], x[5]]
     lat,lon,alt = enu2geodetic(x[0], x[1], x[2], lato, lono, alto)
     if (alt < 80000)&(alt > 0):
@@ -73,27 +84,27 @@ def dynamics(t,x,omegas):
     forces = force_drag + force_thrust + force_gravity
     a = np.multiply(forces, 1 / x[9])
     v_dot = np.matmul(a,R)
-    x_dot = np.concatenate([v,v_dot,omegas,m_dot])
+    x_dot = np.concatenate([v,v_dot,rates,m_dot])
     return x_dot
-def propagate(lato,lono,alto,payload,wind_vel,S,omegas,t_max):
-    t_eval = np.arange(0, t_max, 0.1)
+def propagate(lato,lono,alto,payload,wind_vel,S,opts,t_max):
+    t_eval = np.arange(0,t_max,0.1)
     xo = [0, 0, 0, 0, 0, 0, 0, np.pi / 2, 0, 1860 + payload]
-    sol = solve_ivp(dynamics, [0, t_max], xo, t_eval=t_eval, events=[hit_ground,reach_apogee],args=[omegas])
+    sol = solve_ivp(dynamics, [0, t_max], xo, t_eval = t_eval,events=[hit_ground,reach_apogee],args=[opts])
     return sol
 def obj_func(x):
-    sol = propagate(lato,lono,alto,100,wind_vel,S,[0,x[0],0],1000)
+    sol = propagate(lato,lono,alto,100,wind_vel,S,x,150)
     return -sol.y[3,-1]
 def final_alt(x):
-    sol = propagate(lato,lono,alto,100,wind_vel,S,[0,x[0],0],1000)
+    sol = propagate(lato,lono,alto,100,wind_vel,S,x,150)
     lat, lon, alt = enu2geodetic(sol.y[0], sol.y[1], sol.y[2], lato, lono, alto)
     return alt[-1]
-nlc = NonlinearConstraint(final_alt,100000,101000)
-rate_o = -0.001
-sol_o = propagate(lato,lono,alto,100,wind_vel,S,[0,rate_o,0],1000)
+nlc = NonlinearConstraint(final_alt,50000,51000)
+rate_o = [-0.00157831, -0.0097474,  -0.00919207, -0.00354837]
+sol_o = propagate(lato,lono,alto,100,wind_vel,S,rate_o,150)
 lat_o,lon_o,alt_o = enu2geodetic(sol_o.y[0], sol_o.y[1], sol_o.y[2], lato, lono, alto)
-res = opt(obj_func,[(-0.1,0)],constraints=nlc,disp=True,atol=1E-6,polish=False,x0=rate_o,popsize=15,maxiter=100)
+res = opt(obj_func,[(-0.1,0),(-0.1,0),(-0.1,0),(-0.1,0)],constraints=nlc,disp=True,atol=1E-6,polish=False,x0=rate_o,popsize=15,maxiter=25)
 print(res.x)
-sol = propagate(lato,lono,alto,100,wind_vel,S,[0,res.x[0],0],1000)
+sol = propagate(lato,lono,alto,100,wind_vel,S,res.x,150)
 lat,lon,alt = enu2geodetic(sol.y[0], sol.y[1], sol.y[2], lato, lono, alto)
 fig = plt.figure(figsize=(12, 4))
 ax = fig.add_subplot(111)
