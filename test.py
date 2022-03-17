@@ -10,9 +10,10 @@ plt.style.use('seaborn-poster')
 lato = 0.1
 lono = 0.1
 alto = 0.0
-payload = 0
+burn_time = 120
 wind_vel = [0,0,0]
 S = np.square(0.7692)*np.pi/4
+payload = 544
 def ca(M):
     cd_ref = [0.3,0.26,0.4,0.55,0.47,0.36,0.28,0.24,0.21,0.20,0.20,0.21,0.22,0.23,0.24,0.25]
     M_ref = [0,0.5,1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5]
@@ -29,13 +30,13 @@ hit_ground.direction = -1
 reach_apogee.terminal = True
 reach_apogee.direction = -1
 def thrust_func(t,P):
-    if t < 150:
+    if t < burn_time:
         thrust = [26245,0,0]
     else:
         thrust = [0,0,0]
     return thrust
 def mass_func(t):
-    if t < 150:
+    if t < burn_time:
         m_dot = [-8.8]
     else:
         m_dot = [0]
@@ -88,32 +89,43 @@ def dynamics(t,x,opts):
     return x_dot
 def propagate(lato,lono,alto,payload,wind_vel,S,opts,t_max):
     t_eval = np.arange(0,t_max,0.1)
-    xo = [0, 0, 0, 0, 0, 0, 0, np.pi / 2, 0, 1860 + payload]
-    sol = solve_ivp(dynamics, [0, t_max], xo, t_eval = t_eval,events=[hit_ground,reach_apogee],args=[opts])
+    xo = [0, 0, 0, 0, 0, 0, 0, np.pi / 2, 0, 8.8*burn_time + 450 + payload]
+    sol = solve_ivp(dynamics, [0, t_max], xo, t_eval = t_eval,events=[hit_ground],args=[opts])
     return sol
 def obj_func(x):
-    sol = propagate(lato,lono,alto,100,wind_vel,S,x,150)
+    sol = propagate(lato,lono,alto,payload,wind_vel,S,x,burn_time)
     return -sol.y[3,-1]
 def final_alt(x):
-    sol = propagate(lato,lono,alto,100,wind_vel,S,x,150)
+    sol = propagate(lato,lono,alto,payload,wind_vel,S,x,burn_time)
     lat, lon, alt = enu2geodetic(sol.y[0], sol.y[1], sol.y[2], lato, lono, alto)
     return alt[-1]
-nlc = NonlinearConstraint(final_alt,50000,51000)
-rate_o = [-0.00157831, -0.0097474,  -0.00919207, -0.00354837]
-sol_o = propagate(lato,lono,alto,100,wind_vel,S,rate_o,150)
-lat_o,lon_o,alt_o = enu2geodetic(sol_o.y[0], sol_o.y[1], sol_o.y[2], lato, lono, alto)
+nlc = NonlinearConstraint(final_alt,30000,31000)
+rate_o = [-0.00392592, -0.00274876, -0.02599948, -0.05255883]
+#rate_o = [0,0,0,0]
 res = opt(obj_func,[(-0.1,0),(-0.1,0),(-0.1,0),(-0.1,0)],constraints=nlc,disp=True,atol=1E-6,polish=False,x0=rate_o,popsize=15,maxiter=25)
 print(res.x)
-sol = propagate(lato,lono,alto,100,wind_vel,S,res.x,150)
-lat,lon,alt = enu2geodetic(sol.y[0], sol.y[1], sol.y[2], lato, lono, alto)
+rate_o = res.x
+sol_o = propagate(lato,lono,alto,payload,wind_vel,S,rate_o,1000)
+lat_o,lon_o,alt_o = enu2geodetic(sol_o.y[0], sol_o.y[1], sol_o.y[2], lato, lono, alto)
 fig = plt.figure(figsize=(12, 4))
 ax = fig.add_subplot(111)
-plt.plot(sol_o.y[0],alt_o,label='Original')
-plt.plot(sol.y[0],alt,label='Optimized')
-plt.xlabel('Range[m]')
-plt.ylabel('Altitude[m]')
-ax.set_aspect('equal', adjustable='box')
-ax.legend()
-plt.grid()
+#plt.plot(sol_o.y[0],alt_o,label='Original')
+vel = np.sqrt(np.square(sol_o.y[3])+np.square(sol_o.y[4]))
+inds = np.arange(0,len(alt_o))
+M = np.zeros(len(alt_o))
+for i in inds:
+    atmos = Atmosphere(alt_o[i])
+    M[i] = vel[i]/atmos.speed_of_sound
+plt.plot(sol_o.t,M,label='Optimized')
+plt.xlabel('time[s]')
+plt.ylabel('Mach')
+plt.title('Burn Time = {}s, Payload = {}kg'.format(burn_time,payload))
+#ax.set_aspect('equal', adjustable='box')
+#ax.legend()
+major_ticks = np.arange(0,max(sol_o.t),10)
+minor_ticks = np.arange(0,max(sol_o.t),1)
+ax.set_xticks(major_ticks)
+ax.set_xticks(minor_ticks,minor=True)
+ax.grid(which='minor', alpha=0.2)
+ax.grid(which='major', alpha=0.5)
 plt.show()
-
